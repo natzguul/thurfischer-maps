@@ -10,7 +10,9 @@ param(
     [bool]$UseWsl = $true,
     [string]$WslDistro = "Ubuntu",
     [switch]$DeleteMbtiles,
-    [string]$ManifestBaseUrl = ""
+    [string]$ManifestBaseUrl = "",
+    [switch]$UseWslExampleFiles,
+    [bool]$VerboseProgress = $true
 )
 
 $ErrorActionPreference = "Stop"
@@ -34,6 +36,12 @@ Note: Windows tilemaker builds have been unreliable on some machines.
 function Log([string]$Message) {
     $ts = (Get-Date -Format "HH:mm:ss")
     Write-Host "[$ts] $Message"
+}
+
+function Update-Progress([string]$Activity, [string]$Status, [int]$Percent) {
+    if (-not $VerboseProgress) { return }
+    $pct = [Math]::Max(0, [Math]::Min(100, $Percent))
+    Write-Progress -Activity $Activity -Status $Status -PercentComplete $pct
 }
 
 function Convert-ToWslPath([string]$WindowsPath) {
@@ -86,13 +94,16 @@ function Download-File([string]$Url, [string]$OutFile, [int]$Retries) {
     for ($i = 1; $i -le $Retries; $i++) {
         try {
             Log "Downloading (attempt $i/$Retries): $Url"
+            Update-Progress "Download" "Attempt $i/$Retries" ([int](($i - 1) / [Math]::Max(1, $Retries) * 100))
             Invoke-WebRequest -Uri $Url -OutFile $OutFile -MaximumRedirection 10
+            Update-Progress "Download" "Completed" 100
             return
         } catch {
             if ($i -eq $Retries -and $bits) {
                 try {
                     Log "Invoke-WebRequest failed, trying BITS once: $Url"
                     Start-BitsTransfer -Source $Url -Destination $OutFile
+                    Update-Progress "Download" "Completed (BITS)" 100
                     return
                 } catch {
                     throw
@@ -208,6 +219,7 @@ if (-not $UseWsl) {
 Ensure-Dir $OutputDir
 $OutputDir = Resolve-Path $OutputDir
 
+Update-Progress "Setup" "Preparing workspace" 5
 $workDir = Join-Path $OutputDir "_work"
 $pbfDir = Join-Path $workDir "pbf"
 $storeDir = Join-Path $workDir "store"
@@ -223,11 +235,55 @@ if ($freeGB -lt $MinFreeGB) {
     throw "Low disk space on $($drive.Name): ${freeGB}GB free, need at least ${MinFreeGB}GB."
 }
 
+Update-Progress "Setup" "Preparing config" 10
 $configPath = Join-Path $configDir "config-openmaptiles.json"
 $processPath = Join-Path $configDir "process-openmaptiles.lua"
 $configAdjustedPath = Join-Path $configDir "config-openmaptiles.minmax.json"
-Copy-Item (Join-Path $resourcesDir "config-openmaptiles.json") $configPath -Force
-Copy-Item (Join-Path $resourcesDir "process-openmaptiles.lua") $processPath -Force
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+function Normalize-Lf([string]$Text) {
+    return ($Text -replace "`r`n?", "`n")
+}
+$resourceConfigPath = Join-Path $resourcesDir "config-openmaptiles.json"
+$resourceProcessPath = Join-Path $resourcesDir "process-openmaptiles.lua"
+$resourceNeedsWsl = $false
+if (Test-Path $resourceProcessPath) {
+    $resourceRaw = Get-Content -Raw $resourceProcessPath
+    if ($resourceRaw -match "(^|[^:])\bFind\(") {
+        $resourceNeedsWsl = $true
+    }
+}
+
+$needsRefresh = $false
+if (Test-Path $processPath) {
+    $raw = Get-Content -Raw $processPath
+    $lineCount = (Get-Content $processPath).Count
+    if ($lineCount -lt 20 -or ($raw -notmatch "`n")) {
+        Log "Process file looks invalid (lines=$lineCount). Refreshing."
+        $needsRefresh = $true
+    } elseif ($raw -match "(^|[^:])\bFind\(") {
+        Log "Process file contains bare Find(..). Refreshing."
+        $needsRefresh = $true
+    }
+}
+if ((Test-Path $configPath) -and (Test-Path $processPath) -and (-not $needsRefresh)) {
+    Log "Using existing config/process in $configDir"
+} elseif ($UseWsl -and ($UseWslExampleFiles -or $resourceNeedsWsl)) {
+    $wslConfig = & wsl.exe -d $WslDistro -- sh -lc "test -f /usr/share/doc/tilemaker/examples/config-openmaptiles.json && echo ok" 2>$null
+    $wslProcess = & wsl.exe -d $WslDistro -- sh -lc "test -f /usr/share/doc/tilemaker/examples/process-openmaptiles.lua && echo ok" 2>$null
+    if (-not $wslConfig -or -not $wslProcess) {
+        throw "tilemaker examples not found in WSL. Expected /usr/share/doc/tilemaker/examples/*. Install tilemaker in WSL or copy matching config/process files."
+    }
+    Log "Using WSL tilemaker example config/process (version-matched)."
+    $configText = & wsl.exe -d $WslDistro -- cat /usr/share/doc/tilemaker/examples/config-openmaptiles.json
+    $processText = & wsl.exe -d $WslDistro -- cat /usr/share/doc/tilemaker/examples/process-openmaptiles.lua
+    [System.IO.File]::WriteAllText($configPath, (Normalize-Lf $configText), $utf8NoBom)
+    [System.IO.File]::WriteAllText($processPath, (Normalize-Lf $processText), $utf8NoBom)
+} else {
+    $configSrc = Get-Content -Raw $resourceConfigPath
+    $processSrc = Get-Content -Raw $resourceProcessPath
+    [System.IO.File]::WriteAllText($configPath, (Normalize-Lf $configSrc), $utf8NoBom)
+    [System.IO.File]::WriteAllText($processPath, (Normalize-Lf $processSrc), $utf8NoBom)
+}
 Update-ConfigZoom -ConfigIn $configPath -ConfigOut $configAdjustedPath -MinZoom $MinZoom -MaxZoom $MaxZoom
 Log "Config prepared: $configAdjustedPath (MinZoom=$MinZoom, MaxZoom=$MaxZoom)"
 
@@ -250,7 +306,9 @@ $regions = @(
     "thueringen"
 )
 
+Update-Progress "Setup" "Ensuring coastline data" 15
 Ensure-Coastline -DataDir $configDir -Retries $DownloadRetries
+Update-Progress "Setup" "Ensuring landcover data" 20
 Ensure-Landcover -DataDir $configDir -Retries $DownloadRetries
 
 $manifestPath = Join-Path $OutputDir "download_manifest.json"
@@ -269,6 +327,7 @@ foreach ($slug in $regions) {
     $pmtilesPath = Join-Path $OutputDir ("de_" + $slug + ".pmtiles")
 
     if ($VerifyChecksums -and (Test-Path $pbfPath)) {
+        Update-Progress "PBF" "[$slug] Checking existing checksum" 25
         if (-not (Test-Path $md5Path)) {
             Download-File $md5Url $md5Path $DownloadRetries
         }
@@ -279,11 +338,13 @@ foreach ($slug in $regions) {
     }
 
     if (-not (Test-Path $pbfPath)) {
+        Update-Progress "PBF" "[$slug] Downloading PBF" 30
         Log "PBF missing, downloading: $pbfPath"
         Download-File $pbfUrl $pbfPath $DownloadRetries
     }
 
     if ($VerifyChecksums) {
+        Update-Progress "PBF" "[$slug] Verifying MD5" 35
         Log "Verifying MD5: $pbfPath"
         Download-File $md5Url $md5Path $DownloadRetries
         if (-not (Verify-Md5 $pbfPath $md5Path)) {
@@ -292,6 +353,7 @@ foreach ($slug in $regions) {
     }
 
     if (-not (Test-Path $mbtilesPath)) {
+        Update-Progress "Tilemaker" "[$slug] Generating MBTiles" 55
         Log "Building MBTiles for $slug -> $mbtilesPath"
         if ($UseWsl) {
             Run-TilemakerWsl `
@@ -322,6 +384,7 @@ foreach ($slug in $regions) {
     }
 
     if (-not (Test-Path $pmtilesPath)) {
+        Update-Progress "PMTiles" "[$slug] Converting MBTiles -> PMTiles" 85
         Log "Converting to PMTiles -> $pmtilesPath"
         & $pmtiles convert $mbtilesPath $pmtilesPath
         if ($LASTEXITCODE -ne 0) { throw "pmtiles convert failed for $slug (exit code: $LASTEXITCODE)" }
@@ -350,6 +413,8 @@ $manifest = [ordered]@{
     regions = $manifestItems
 }
 $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+Update-Progress "Manifest" "Writing manifest" 95
 [System.IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json -Depth 6), $utf8NoBom)
 Log "Manifest written: $manifestPath"
+Update-Progress "Done" "Completed" 100
 Log "Done. Output: $OutputDir"

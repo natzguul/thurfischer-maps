@@ -88,6 +88,36 @@ function Download-File([string]$Url, [string]$OutFile, [int]$Retries) {
     }
 }
 
+function Wait-FileUnlocked([string]$Path, [int]$Retries) {
+    for ($i = 1; $i -le $Retries; $i++) {
+        try {
+            $stream = [System.IO.File]::Open($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::None)
+            $stream.Close()
+            return $true
+        } catch {
+            Start-Sleep -Seconds (2 * $i)
+        }
+    }
+    return $false
+}
+
+function Remove-FileWithRetry([string]$Path, [int]$Retries) {
+    for ($i = 1; $i -le $Retries; $i++) {
+        try {
+            if (-not (Test-Path $Path)) { return $true }
+            if (-not (Wait-FileUnlocked -Path $Path -Retries 1)) {
+                Start-Sleep -Seconds (2 * $i)
+                continue
+            }
+            Remove-Item -Force $Path
+            return $true
+        } catch {
+            Start-Sleep -Seconds (2 * $i)
+        }
+    }
+    return $false
+}
+
 function Verify-Md5([string]$FilePath, [string]$Md5Path) {
     if (-not (Test-Path $FilePath)) { return $false }
     if (-not (Test-Path $Md5Path)) { return $false }
@@ -95,6 +125,7 @@ function Verify-Md5([string]$FilePath, [string]$Md5Path) {
     if (-not $md5Line) { return $false }
     $expected = $md5Line.Split(" ")[0].Trim().ToLowerInvariant()
     if (-not $expected) { return $false }
+    if (-not (Wait-FileUnlocked -Path $FilePath -Retries $DownloadRetries)) { return $false }
     $actual = (Get-FileHash -Algorithm MD5 -Path $FilePath).Hash.ToLowerInvariant()
     return $expected -eq $actual
 }
@@ -122,7 +153,34 @@ function Ensure-Coastline([string]$DataDir, [int]$Retries) {
     $zipPath = Join-Path $coastDir "water-polygons-split-4326.zip"
     Download-File $zipUrl $zipPath $Retries
     $extractDir = Join-Path $coastDir "water-polygons-split-4326"
-    Expand-Archive -Path $zipPath -DestinationPath $extractDir -Force
+    $extracted = $false
+    if ($UseWsl) {
+        $zipWsl = Convert-ToWslPath $zipPath
+        $extractWsl = Convert-ToWslPath $extractDir
+        for ($i = 1; $i -le $Retries; $i++) {
+            try {
+                & wsl.exe -d $WslDistro -- bash -lc "mkdir -p '$extractWsl' && unzip -o '$zipWsl' -d '$extractWsl'"
+                $extracted = $true
+                break
+            } catch {
+                Start-Sleep -Seconds (2 * $i)
+            }
+        }
+    } else {
+        for ($i = 1; $i -le $Retries; $i++) {
+            try {
+                $zipTemp = Join-Path $coastDir ("water-polygons-split-4326_tmp_" + [guid]::NewGuid().ToString("N") + ".zip")
+                Copy-Item -Path $zipPath -Destination $zipTemp -Force
+                Expand-Archive -Path $zipTemp -DestinationPath $extractDir -Force
+                Remove-Item -Force $zipTemp -ErrorAction SilentlyContinue
+                $extracted = $true
+                break
+            } catch {
+                Start-Sleep -Seconds (2 * $i)
+            }
+        }
+    }
+    if (-not $extracted) { throw "Failed to extract coastline data from $zipPath (locked or corrupted)." }
     $found = Get-ChildItem -Path $extractDir -Recurse -Filter "water_polygons.shp" | Select-Object -First 1
     if (-not $found) { throw "Could not find water_polygons.shp after extracting coastline data." }
     $base = [System.IO.Path]::GetFileNameWithoutExtension($found.Name)
@@ -231,8 +289,8 @@ if ((Test-Path $configPath) -and (Test-Path $processPath) -and (-not $needsRefre
         throw "tilemaker examples not found in WSL. Expected /usr/share/doc/tilemaker/examples/*. Install tilemaker in WSL or copy matching config/process files."
     }
     Log "Using WSL tilemaker example config/process (version-matched)."
-    $configText = & wsl.exe -d $WslDistro -- cat /usr/share/doc/tilemaker/examples/config-openmaptiles.json
-    $processText = & wsl.exe -d $WslDistro -- cat /usr/share/doc/tilemaker/examples/process-openmaptiles.lua
+    $configText = (& wsl.exe -d $WslDistro -- cat /usr/share/doc/tilemaker/examples/config-openmaptiles.json) -join "`n"
+    $processText = (& wsl.exe -d $WslDistro -- cat /usr/share/doc/tilemaker/examples/process-openmaptiles.lua) -join "`n"
     [System.IO.File]::WriteAllText($configPath, (Normalize-Lf $configText), $utf8NoBom)
     [System.IO.File]::WriteAllText($processPath, (Normalize-Lf $processText), $utf8NoBom)
 } else {
@@ -263,7 +321,14 @@ $pmtilesPath = Join-Path $OutputDir ("$CountryCode" + "_" + $slug + ".pmtiles")
 if ($VerifyChecksums -and (Test-Path $pbfPath)) {
     Update-Progress "PBF" "Checking existing checksum" 25
     if (-not (Test-Path $md5Path)) { Download-File $md5Url $md5Path $DownloadRetries }
-    if (-not (Verify-Md5 $pbfPath $md5Path)) { Log "Checksum mismatch, re-downloading: $pbfPath"; Remove-Item -Force $pbfPath }
+    if (-not (Verify-Md5 $pbfPath $md5Path)) {
+        Log "Checksum mismatch, re-downloading: $pbfPath"
+        if (-not (Remove-FileWithRetry -Path $pbfPath -Retries $DownloadRetries)) {
+            $pbfPath = Join-Path $pbfDir "$slug-latest.osm.pbf.new"
+            $md5Path = Join-Path $pbfDir "$slug-latest.osm.pbf.new.md5"
+            Log "Locked file could not be removed; using alternate download path: $pbfPath"
+        }
+    }
 }
 
 if (-not (Test-Path $pbfPath)) { Log "PBF missing, downloading: $pbfPath"; Download-File $pbfUrl $pbfPath $DownloadRetries }

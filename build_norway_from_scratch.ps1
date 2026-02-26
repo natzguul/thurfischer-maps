@@ -8,7 +8,7 @@ param(
     [bool]$DownloadLandcover = $true,
     [bool]$DownloadCoastline = $true,
     [bool]$UseWsl = $true,
-    [string]$WslDistro = "Ubuntu",
+    [string]$WslDistro = "kali-linux",
     [switch]$DeleteMbtiles,
     [string]$ManifestBaseUrl = "",
     [switch]$UseWslExampleFiles,
@@ -54,6 +54,7 @@ function Run-TilemakerWsl([string]$WorkDirWin, [string]$InputWin, [string]$Outpu
     $config = "./$(Split-Path -Leaf $ConfigWin)"
     $process = "./$(Split-Path -Leaf $ProcessWin)"
     Log "tilemaker (WSL) start (distro=$WslDistro)"
+    $oldEAP = $ErrorActionPreference; $ErrorActionPreference = "Continue"
     & wsl.exe -d $WslDistro --cd $work -- tilemaker `
         --input $input `
         --output $output `
@@ -61,6 +62,8 @@ function Run-TilemakerWsl([string]$WorkDirWin, [string]$InputWin, [string]$Outpu
         --process $process `
         --store $store `
         --threads 0
+    $global:LASTEXITCODE = $LASTEXITCODE
+    $ErrorActionPreference = $oldEAP
 }
 
 function Ensure-Dir([string]$Path) { if (-not (Test-Path $Path)) { New-Item -ItemType Directory -Path $Path | Out-Null } }
@@ -69,16 +72,22 @@ function Download-File([string]$Url, [string]$OutFile, [int]$Retries) {
     Ensure-Dir (Split-Path $OutFile -Parent)
     if (Test-Path $OutFile) { Log "Skip download (exists): $OutFile"; return }
     $bits = Get-Command Start-BitsTransfer -ErrorAction SilentlyContinue
+    $curl = Get-Command curl.exe -ErrorAction SilentlyContinue
     for ($i = 1; $i -le $Retries; $i++) {
         try {
             Log "Downloading (attempt $i/$Retries): $Url"
             Update-Progress "Download" "Attempt $i/$Retries" ([int](($i - 1) / [Math]::Max(1, $Retries) * 100))
-            Invoke-WebRequest -Uri $Url -OutFile $OutFile -MaximumRedirection 10
+            if ($curl) {
+                & curl.exe -L -o $OutFile $Url
+                if ($LASTEXITCODE -ne 0) { throw "curl failed with exit code $LASTEXITCODE" }
+            } else {
+                Invoke-WebRequest -Uri $Url -OutFile $OutFile -MaximumRedirection 10 -UseBasicParsing
+            }
             Update-Progress "Download" "Completed" 100
             return
         } catch {
             if ($i -eq $Retries -and $bits) {
-                Log "Invoke-WebRequest failed, trying BITS once: $Url"
+                Log "Download failed, trying BITS once: $Url"
                 Start-BitsTransfer -Source $Url -Destination $OutFile
                 Update-Progress "Download" "Completed (BITS)" 100
                 return
@@ -159,7 +168,9 @@ function Ensure-Coastline([string]$DataDir, [int]$Retries) {
         $extractWsl = Convert-ToWslPath $extractDir
         for ($i = 1; $i -le $Retries; $i++) {
             try {
+                $oldEAP = $ErrorActionPreference; $ErrorActionPreference = "Continue"
                 & wsl.exe -d $WslDistro -- bash -lc "mkdir -p '$extractWsl' && unzip -o '$zipWsl' -d '$extractWsl'"
+                $ErrorActionPreference = $oldEAP
                 $extracted = $true
                 break
             } catch {
@@ -229,7 +240,9 @@ if (-not $UseWsl) {
 } else {
     $wsl = Get-Command wsl.exe -ErrorAction SilentlyContinue
     if (-not $wsl) { throw "WSL not found. Install WSL or set -UseWsl:$false" }
+    $oldEAP = $ErrorActionPreference; $ErrorActionPreference = "Continue"
     $tm = & wsl.exe -d $WslDistro -- which tilemaker 2>$null
+    $ErrorActionPreference = $oldEAP
     if (-not $tm) { throw "tilemaker not found in WSL distro '$WslDistro'. Install it or set -UseWsl:$false" }
 }
 
@@ -283,14 +296,17 @@ if (Test-Path $processPath) {
 if ((Test-Path $configPath) -and (Test-Path $processPath) -and (-not $needsRefresh)) {
     Log "Using existing config/process in $configDir"
 } elseif ($UseWsl -and ($UseWslExampleFiles -or $resourceNeedsWsl)) {
+    $oldEAP = $ErrorActionPreference; $ErrorActionPreference = "Continue"
     $wslConfig = & wsl.exe -d $WslDistro -- sh -lc "test -f /usr/share/doc/tilemaker/examples/config-openmaptiles.json && echo ok" 2>$null
     $wslProcess = & wsl.exe -d $WslDistro -- sh -lc "test -f /usr/share/doc/tilemaker/examples/process-openmaptiles.lua && echo ok" 2>$null
     if (-not $wslConfig -or -not $wslProcess) {
+        $ErrorActionPreference = $oldEAP
         throw "tilemaker examples not found in WSL. Expected /usr/share/doc/tilemaker/examples/*. Install tilemaker in WSL or copy matching config/process files."
     }
     Log "Using WSL tilemaker example config/process (version-matched)."
     $configText = (& wsl.exe -d $WslDistro -- cat /usr/share/doc/tilemaker/examples/config-openmaptiles.json) -join "`n"
     $processText = (& wsl.exe -d $WslDistro -- cat /usr/share/doc/tilemaker/examples/process-openmaptiles.lua) -join "`n"
+    $ErrorActionPreference = $oldEAP
     [System.IO.File]::WriteAllText($configPath, (Normalize-Lf $configText), $utf8NoBom)
     [System.IO.File]::WriteAllText($processPath, (Normalize-Lf $processText), $utf8NoBom)
 } else {

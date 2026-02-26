@@ -1,0 +1,110 @@
+{
+  "generatedAt": "2026-02-26T11:13:00.0000000+01:00",
+  "format": "pmtiles",
+  "minZoom": 1,
+  "maxZoom": 17,
+  "regions": [
+    {
+      "name": "se_sweden",
+      "file": "se_sweden.pmtiles",
+      "sizeBytes": 990976766,
+      "url": "https://github.com/natzguul/thurfischer-maps/releases/download/Schweden/se_sweden.pmtiles"
+    },
+    {
+      "name": "de_baden-wuerttemberg",
+      "file": "de_baden-wuerttemberg.pmtiles",
+      "sizeBytes": 366276033,
+      "url": "https://github.com/natzguul/thurfischer-maps/releases/download/V1.0/de_baden-wuerttemberg.pmtiles"
+    },
+    {
+      "name": "de_bayern",
+      "file": "de_bayern.pmtiles",
+      "sizeBytes": 522914254,
+      "url": "https://github.com/natzguul/thurfischer-maps/releases/download/V1.0/de_bayern.pmtiles"
+    },
+    {
+      "name": "de_berlin",
+      "file": "de_berlin.pmtiles",
+      "sizeBytes": 40877565,
+      "url": "https://github.com/natzguul/thurfischer-maps/releases/download/V1.0/de_berlin.pmtiles"
+    },
+    {
+      "name": "de_brandenburg",
+      "file": "de_brandenburg.pmtiles",
+      "sizeBytes": 184213213,
+      "url": "https://github.com/natzguul/thurfischer-maps/releases/download/V1.0/de_brandenburg.pmtiles"
+    },
+    {
+      "name": "de_bremen",
+      "file": "de_bremen.pmtiles",
+      "sizeBytes": 11098540,
+      "url": "https://github.com/natzguul/thurfischer-maps/releases/download/V1.0/de_bremen.pmtiles"
+    },
+    {
+      "name": "de_hamburg",
+      "file": "de_hamburg.pmtiles",
+      "sizeBytes": 23526306,
+      "url": "https://github.com/natzguul/thurfischer-maps/releases/download/V1.0/de_hamburg.pmtiles"
+    },
+    {
+      "name": "de_hessen",
+      "file": "de_hessen.pmtiles",
+      "sizeBytes": 199965530,
+      "url": "https://github.com/natzguul/thurfischer-maps/releases/download/V1.0/de_hessen.pmtiles"
+    },
+    {
+      "name": "de_mecklenburg-vorpommern",
+      "file": "de_mecklenburg-vorpommern.pmtiles",
+      "sizeBytes": 101245452,
+      "url": "https://github.com/natzguul/thurfischer-maps/releases/download/V1.0/de_mecklenburg-vorpommern.pmtiles"
+    },
+    {
+      "name": "de_niedersachsen",
+      "file": "de_niedersachsen.pmtiles",
+      "sizeBytes": 339644162,
+      "url": "https://github.com/natzguul/thurfischer-maps/releases/download/V1.0/de_niedersachsen.pmtiles"
+    },
+    {
+      "name": "de_nordrhein-westfalen",
+      "file": "de_nordrhein-westfalen.pmtiles",
+      "sizeBytes": 491896165,
+      "url": "https://github.com/natzguul/thurfischer-maps/releases/download/V1.0/de_nordrhein-westfalen.pmtiles"
+    },
+    {
+      "name": "de_rheinland-pfalz",
+      "file": "de_rheinland-pfalz.pmtiles",
+      "sizeBytes": 165262509,
+      "url": "https://github.com/natzguul/thurfischer-maps/releases/download/V1.0/de_rheinland-pfalz.pmtiles"
+    },
+    {
+      "name": "de_saarland",
+      "file": "de_saarland.pmtiles",
+      "sizeBytes": 29450005,
+      "url": "https://github.com/natzguul/thurfischer-maps/releases/download/V1.0/de_saarland.pmtiles"
+    },
+    {
+      "name": "de_sachsen-anhalt",
+      "file": "de_sachsen-anhalt.pmtiles",
+      "sizeBytes": 117386343,
+      "url": "https://github.com/natzguul/thurfischer-maps/releases/download/V1.0/de_sachsen-anhalt.pmtiles"
+    },
+    {
+      "name": "de_sachsen",
+      "file": "de_sachsen.pmtiles",
+      "sizeBytes": 161511133,
+      "url": "https://github.com/natzguul/thurfischer-maps/releases/download/V1.0/de_sachsen.pmtiles"
+    },
+    {
+      "name": "de_schleswig-holstein",
+      "file": "de_schleswig-holstein.pmtiles",
+      "sizeBytes": 112484259,
+      "url": "https://github.com/natzguul/thurfischer-maps/releases/download/V1.0/de_schleswig-holstein.pmtiles"
+    },
+    {
+      "name": "de_thueringen",
+      "file": "de_thueringen.pmtiles",
+      "sizeBytes": 108930408,
+      "url": "https://github.com/natzguul/thurfischer-maps/releases/download/V1.0/de_thueringen.pmtiles"
+    }
+  ]
+}
